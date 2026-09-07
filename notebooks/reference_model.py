@@ -370,17 +370,3 @@ summary_df.to_csv(
 )
 
 
-
-# 16. FINISH
-print("\n" + "=" * 70)
-print("PERSON 2 PIPELINE COMPLETE")
-print("=" * 70)
-
-print("\nFiles created inside the output folder:")
-
-print("1. model_comparison.csv")
-print("2. feature_importance.csv")
-print("3. Person2_Reference_Parameter_Predictions.csv")
-print("4. person2_summary.csv")
-
-print("\nYour Reference Parameter predictions are ready.")
