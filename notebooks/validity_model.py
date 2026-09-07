@@ -1,6 +1,4 @@
 """
-PERSON 3 -- VALID / INVALID  (full deliverable matching the role brief)
-
 Produces exactly what the brief asks for:
   - Compares Logistic Regression, Random Forest, Extra Trees, Gradient Boosting
   - Evaluates each with Precision, Recall, F1-score, Confusion Matrix
@@ -88,12 +86,6 @@ comparison["difference"] = comparison["Invalid"] - comparison["Valid"]
 comparison["pct_difference"] = (comparison["difference"] / comparison["Valid"] * 100).round(1)
 print(comparison.sort_values("pct_difference", key=abs, ascending=False).to_string())
 
-print("""
-How to read this: for each input, we compare the AVERAGE value in Invalid
-tests vs Valid tests. A large % difference means that feature behaves
-noticeably differently when a test is Invalid -- these are your real,
-explainable "abnormal patterns" to write up (not just "the model said so").
-""")
 
 
 print("=== Predicting on the real TEST set using the best model ===\n")
