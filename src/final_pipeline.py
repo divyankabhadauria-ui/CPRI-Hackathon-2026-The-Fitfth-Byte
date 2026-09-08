@@ -1,10 +1,19 @@
-import json
 from pathlib import Path
+import json
 
 import numpy as np
 import pandas as pd
 
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestClassifier
+from sklearn.ensemble import (
+    GradientBoostingRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+    ExtraTreesRegressor,
+    HistGradientBoostingRegressor
+)
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.metrics import mean_absolute_error, f1_score
 
 
 # ============================================================
@@ -13,14 +22,18 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestClassifier
 
 ROOT = Path(__file__).resolve().parents[1]
 
-DATA_FILE = ROOT / "data" / "CPRI_Hackathon_Screening_Dataset_PARTICIPANT.xlsx"
-OUTPUT_DIR = ROOT / "outputs"
+DATA_FILE = (
+    ROOT
+    / "data"
+    / "CPRI_Hackathon_Screening_Dataset_PARTICIPANT.xlsx"
+)
 
+OUTPUT_DIR = ROOT / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
 # ============================================================
-# FEATURES
+# BASE FEATURES
 # ============================================================
 
 BASE_FEATURES = [
@@ -34,52 +47,35 @@ BASE_FEATURES = [
     "Sensor_S4"
 ]
 
-REGRESSION_FEATURES = BASE_FEATURES + [
-    "V_times_I"
-]
-
-CLASSIFICATION_FEATURES = BASE_FEATURES + [
-    "V_times_I",
-    "S1_minus_S2",
-    "S1_minus_S3",
-    "S2_minus_S3",
-    "Sensor_S1_missing",
-    "Sensor_S2_missing",
-    "Sensor_S3_missing",
-    "Sensor_S4_missing"
-]
-
 
 # ============================================================
 # FEATURE ENGINEERING
 # ============================================================
 
 def add_features(df):
+
     df = df.copy()
 
-    # Missing-value indicators
-    for sensor in ["Sensor_S1", "Sensor_S2", "Sensor_S3", "Sensor_S4"]:
-        df[sensor + "_missing"] = df[sensor].isna().astype(int)
-
-    # Physical / sensor relationship features
+    # Electrical relationship
     df["V_times_I"] = (
-        df["Applied_Voltage_kV"] *
-        df["Load_Current_A"]
+        df["Applied_Voltage_kV"]
+        * df["Load_Current_A"]
     )
 
+    # Sensor difference features
     df["S1_minus_S2"] = (
-        df["Sensor_S1"] -
-        df["Sensor_S2"]
+        df["Sensor_S1"]
+        - df["Sensor_S2"]
     )
 
     df["S1_minus_S3"] = (
-        df["Sensor_S1"] -
-        df["Sensor_S3"]
+        df["Sensor_S1"]
+        - df["Sensor_S3"]
     )
 
     df["S2_minus_S3"] = (
-        df["Sensor_S2"] -
-        df["Sensor_S3"]
+        df["Sensor_S2"]
+        - df["Sensor_S3"]
     )
 
     return df
@@ -94,17 +90,47 @@ def clean_data(train, test):
     train = train.copy()
     test = test.copy()
 
-    # Create features before filling missing values
-    train = add_features(train)
-    test = add_features(test)
+    # --------------------------------------------------------
+    # 1. Create missing-value indicators FIRST
+    # --------------------------------------------------------
 
-    # Fill numeric missing values using TRAINING medians only
+    for sensor in [
+        "Sensor_S1",
+        "Sensor_S2",
+        "Sensor_S3",
+        "Sensor_S4"
+    ]:
+
+        train[sensor + "_missing"] = (
+            train[sensor].isna().astype(int)
+        )
+
+        test[sensor + "_missing"] = (
+            test[sensor].isna().astype(int)
+        )
+
+    # --------------------------------------------------------
+    # 2. Fill missing values using TRAINING medians
+    # --------------------------------------------------------
+
     for column in BASE_FEATURES:
 
         median_value = train[column].median()
 
-        train[column] = train[column].fillna(median_value)
-        test[column] = test[column].fillna(median_value)
+        train[column] = train[column].fillna(
+            median_value
+        )
+
+        test[column] = test[column].fillna(
+            median_value
+        )
+
+    # --------------------------------------------------------
+    # 3. Create engineered features AFTER imputation
+    # --------------------------------------------------------
+
+    train = add_features(train)
+    test = add_features(test)
 
     return train, test
 
@@ -117,6 +143,10 @@ def main():
 
     print("Loading data...")
 
+    # --------------------------------------------------------
+    # LOAD ORIGINAL DATASET
+    # --------------------------------------------------------
+
     train = pd.read_excel(
         DATA_FILE,
         sheet_name="Training_Data"
@@ -127,105 +157,285 @@ def main():
         sheet_name="Test_Data"
     )
 
-    print("Training rows:", len(train))
-    print("Test rows:", len(test))
+    print(f"Training rows: {len(train)}")
+    print(f"Test rows: {len(test)}")
 
     # --------------------------------------------------------
-    # CLEAN DATA
+    # CLEAN + FEATURE ENGINEERING
     # --------------------------------------------------------
 
     train, test = clean_data(train, test)
 
-    # --------------------------------------------------------
-    # TARGETS
-    # --------------------------------------------------------
+    # ========================================================
+    # REGRESSION
+    # ========================================================
 
-    y_reg = train["Reference_Parameter"]
-
-    y_class = train["Validity_Label"]
-
-    # --------------------------------------------------------
-    # REGRESSION MODEL
-    # Gradient Boosting
-    # --------------------------------------------------------
+    REGRESSION_FEATURES = BASE_FEATURES + [
+        "V_times_I"
+    ]
 
     X_reg = train[REGRESSION_FEATURES]
+    y_reg = train["Reference_Parameter"]
+
     X_test_reg = test[REGRESSION_FEATURES]
 
-    regression_model = GradientBoostingRegressor(
-        n_estimators=500,
-        learning_rate=0.10,
-        max_depth=2,
-        min_samples_split=20,
-        min_samples_leaf=2,
+    regression_models = {
+
+        "Linear Regression":
+            LinearRegression(),
+
+        "Random Forest":
+            RandomForestRegressor(
+                n_estimators=500,
+                random_state=42,
+                n_jobs=-1
+            ),
+
+        "Extra Trees":
+            ExtraTreesRegressor(
+                n_estimators=500,
+                random_state=42,
+                n_jobs=-1
+            ),
+
+        "Gradient Boosting":
+            GradientBoostingRegressor(
+                n_estimators=500,
+                learning_rate=0.10,
+                max_depth=2,
+                min_samples_split=20,
+                min_samples_leaf=2,
+                random_state=42
+            ),
+
+        "Hist Gradient Boosting":
+            HistGradientBoostingRegressor(
+                max_iter=300,
+                learning_rate=0.05,
+                max_leaf_nodes=31,
+                random_state=42
+            )
+    }
+
+    print("\n========== REGRESSION ==========")
+
+    kfold = KFold(
+        n_splits=5,
+        shuffle=True,
         random_state=42
     )
 
-    regression_model.fit(
+    regression_results = []
+
+    for name, model in regression_models.items():
+
+        fold_mae = []
+
+        for train_idx, val_idx in kfold.split(X_reg):
+
+            X_train = X_reg.iloc[train_idx]
+            X_val = X_reg.iloc[val_idx]
+
+            y_train = y_reg.iloc[train_idx]
+            y_val = y_reg.iloc[val_idx]
+
+            model.fit(X_train, y_train)
+
+            prediction = model.predict(X_val)
+
+            mae = mean_absolute_error(
+                y_val,
+                prediction
+            )
+
+            fold_mae.append(mae)
+
+        average_mae = np.mean(fold_mae)
+
+        regression_results.append({
+            "Model": name,
+            "CV_MAE": average_mae
+        })
+
+        print(
+            f"{name}: CV MAE = "
+            f"{average_mae:.6f}"
+        )
+
+    regression_results_df = pd.DataFrame(
+        regression_results
+    )
+
+    regression_results_df = regression_results_df.sort_values(
+        "CV_MAE"
+    )
+
+    best_regression_name = (
+        regression_results_df.iloc[0]["Model"]
+    )
+
+    best_regression_mae = float(
+        regression_results_df.iloc[0]["CV_MAE"]
+    )
+
+    print(
+        f"\nBest regression model: "
+        f"{best_regression_name}"
+    )
+
+    # --------------------------------------------------------
+    # TRAIN BEST REGRESSION MODEL ON ALL DATA
+    # --------------------------------------------------------
+
+    best_regression_model = regression_models[
+        best_regression_name
+    ]
+
+    best_regression_model.fit(
         X_reg,
         y_reg
     )
 
-    predicted_reference = regression_model.predict(
-        X_test_reg
+    reference_predictions = (
+        best_regression_model.predict(
+            X_test_reg
+        )
     )
 
+    # ========================================================
+    # CLASSIFICATION
+    # ========================================================
+
+    CLASSIFICATION_FEATURES = BASE_FEATURES + [
+        "V_times_I",
+        "S1_minus_S2",
+        "S1_minus_S3",
+        "S2_minus_S3",
+        "Sensor_S1_missing",
+        "Sensor_S2_missing",
+        "Sensor_S3_missing",
+        "Sensor_S4_missing"
+    ]
+
+    X_cls = train[CLASSIFICATION_FEATURES]
+
+    y_cls = (
+        train["Validity_Label"]
+        .map({
+            "Valid": 0,
+            "Invalid": 1
+        })
+    )
+
+    X_test_cls = test[CLASSIFICATION_FEATURES]
+
     # --------------------------------------------------------
-    # CLASSIFICATION MODEL
-    # Random Forest
+    # RANDOM FOREST CLASSIFIER
     # --------------------------------------------------------
 
-    X_class = train[CLASSIFICATION_FEATURES]
-    X_test_class = test[CLASSIFICATION_FEATURES]
-
-    classification_model = RandomForestClassifier(
+    classifier = RandomForestClassifier(
         n_estimators=700,
         class_weight="balanced",
         random_state=42,
         n_jobs=-1
     )
 
-    classification_model.fit(
-        X_class,
-        y_class
+    print("\n========== CLASSIFICATION ==========")
+
+    skfold = StratifiedKFold(
+        n_splits=5,
+        shuffle=True,
+        random_state=42
     )
 
-    predicted_validity = classification_model.predict(
-        X_test_class
+    f1_scores = []
+
+    for train_idx, val_idx in skfold.split(
+        X_cls,
+        y_cls
+    ):
+
+        X_train = X_cls.iloc[train_idx]
+        X_val = X_cls.iloc[val_idx]
+
+        y_train = y_cls.iloc[train_idx]
+        y_val = y_cls.iloc[val_idx]
+
+        classifier.fit(
+            X_train,
+            y_train
+        )
+
+        prediction = classifier.predict(
+            X_val
+        )
+
+        score = f1_score(
+            y_val,
+            prediction
+        )
+
+        f1_scores.append(score)
+
+    classification_f1 = float(
+        np.mean(f1_scores)
     )
 
-    # Probability of Invalid
-    probabilities = classification_model.predict_proba(
-        X_test_class
+    print(
+        f"Random Forest CV F1 = "
+        f"{classification_f1:.6f}"
     )
-
-    class_names = list(classification_model.classes_)
-
-    if "Invalid" in class_names:
-        invalid_index = class_names.index("Invalid")
-        invalid_probability = probabilities[:, invalid_index]
-    else:
-        invalid_probability = np.zeros(len(test))
 
     # --------------------------------------------------------
+    # TRAIN CLASSIFIER ON ALL TRAINING DATA
+    # --------------------------------------------------------
+
+    classifier.fit(
+        X_cls,
+        y_cls
+    )
+
+    validity_numeric = classifier.predict(
+        X_test_cls
+    )
+
+    invalid_probability = (
+        classifier.predict_proba(
+            X_test_cls
+        )[:, 1]
+    )
+
+    validity_predictions = np.where(
+        validity_numeric == 1,
+        "Invalid",
+        "Valid"
+    )
+
+    # ========================================================
     # ATTENTION SCORE
-    # --------------------------------------------------------
+    # ========================================================
 
-    sensor_differences = (
-        test["S1_minus_S2"].abs() +
-        test["S1_minus_S3"].abs() +
-        test["S2_minus_S3"].abs()
+    sensor_difference = (
+        test["S1_minus_S2"].abs()
+        + test["S1_minus_S3"].abs()
+        + test["S2_minus_S3"].abs()
     ) / 3
 
-    max_difference = sensor_differences.max()
+    if sensor_difference.max() != sensor_difference.min():
 
-    if max_difference > 0:
-        normalized_difference = (
-            sensor_differences /
-            max_difference
+        normalized_sensor_difference = (
+            sensor_difference
+            - sensor_difference.min()
+        ) / (
+            sensor_difference.max()
+            - sensor_difference.min()
         )
+
     else:
-        normalized_difference = np.zeros(len(test))
+
+        normalized_sensor_difference = (
+            sensor_difference * 0
+        )
 
     missing_proportion = (
         test[
@@ -235,44 +445,29 @@ def main():
                 "Sensor_S3_missing",
                 "Sensor_S4_missing"
             ]
-        ].sum(axis=1) / 4
+        ].mean(axis=1)
     )
 
     attention_score = (
-        0.70 * invalid_probability +
-        0.20 * normalized_difference +
-        0.10 * missing_proportion
+        0.70 * invalid_probability
+        + 0.20 * normalized_sensor_difference
+        + 0.10 * missing_proportion
     )
 
-    # --------------------------------------------------------
-    # FINAL SUBMISSION
-    # --------------------------------------------------------
+    attention_df = pd.DataFrame({
 
-    submission = pd.DataFrame({
         "Test_ID": test["Test_ID"],
-        "Predicted_Reference_Parameter": predicted_reference,
-        "Validity_Label": predicted_validity
-    })
 
-    submission_file = OUTPUT_DIR / "TheFifthByte.csv"
+        "attention_score":
+            attention_score,
 
-    submission.to_csv(
-        submission_file,
-        index=False
-    )
+        "invalid_probability":
+            invalid_probability
 
-    # --------------------------------------------------------
-    # TOP 3 TEST IDs
-    # --------------------------------------------------------
-
-    attention_table = pd.DataFrame({
-        "Test_ID": test["Test_ID"],
-        "attention_score": attention_score,
-        "invalid_probability": invalid_probability
     })
 
     top_3 = (
-        attention_table
+        attention_df
         .sort_values(
             "attention_score",
             ascending=False
@@ -280,80 +475,185 @@ def main():
         .head(3)
     )
 
-    # --------------------------------------------------------
+    # ========================================================
+    # FINAL SUBMISSION
+    # ========================================================
+
+    submission = pd.DataFrame({
+
+        "Test_ID":
+            test["Test_ID"],
+
+        "Predicted_Reference_Parameter":
+            reference_predictions,
+
+        "Validity_Label":
+            validity_predictions
+    })
+
+    output_csv = (
+        OUTPUT_DIR
+        / "TheFifthByte.csv"
+    )
+
+    submission.to_csv(
+        output_csv,
+        index=False
+    )
+
+    # ========================================================
     # SUMMARY
-    # --------------------------------------------------------
+    # ========================================================
 
     summary = {
-        "number_of_records": int(len(test)),
 
-        "number_valid": int(
-            (predicted_validity == "Valid").sum()
-        ),
+        "number_of_records":
+            int(len(submission)),
 
-        "number_invalid": int(
-            (predicted_validity == "Invalid").sum()
-        ),
+        "number_valid":
+            int(
+                (submission["Validity_Label"] == "Valid")
+                .sum()
+            ),
 
-        "minimum_predicted_reference_parameter": float(
-            predicted_reference.min()
-        ),
+        "number_invalid":
+            int(
+                (submission["Validity_Label"] == "Invalid")
+                .sum()
+            ),
 
-        "maximum_predicted_reference_parameter": float(
-            predicted_reference.max()
-        ),
+        "minimum_predicted_reference_parameter":
+            float(
+                submission[
+                    "Predicted_Reference_Parameter"
+                ].min()
+            ),
 
-        "average_predicted_reference_parameter": float(
-            predicted_reference.mean()
-        ),
+        "maximum_predicted_reference_parameter":
+            float(
+                submission[
+                    "Predicted_Reference_Parameter"
+                ].max()
+            ),
 
-        "top_3_test_ids_needing_attention": (
-            top_3["Test_ID"].tolist()
-        ),
+        "average_predicted_reference_parameter":
+            float(
+                submission[
+                    "Predicted_Reference_Parameter"
+                ].mean()
+            ),
 
-        "regression_model": "Gradient Boosting",
+        "top_3_test_ids_needing_attention":
+            top_3["Test_ID"].tolist(),
 
-        "classification_model": "Random Forest"
+        "regression_model":
+            best_regression_name,
+
+        "regression_cv_mae":
+            best_regression_mae,
+
+        "classification_model":
+            "Random Forest",
+
+        "classification_cv_f1":
+            classification_f1
     }
 
-    summary_file = OUTPUT_DIR / "summary.json"
+    output_summary = (
+        OUTPUT_DIR
+        / "summary.json"
+    )
 
-    with open(summary_file, "w") as f:
+    with open(
+        output_summary,
+        "w"
+    ) as file:
+
         json.dump(
             summary,
-            f,
+            file,
             indent=4
         )
 
-    # --------------------------------------------------------
-    # FINAL CHECKS
-    # --------------------------------------------------------
+    # ========================================================
+    # FINAL CHECK
+    # ========================================================
 
     print("\n========== FINAL CHECK ==========")
 
-    print("Submission rows:", len(submission))
-    print("Unique Test IDs:", submission["Test_ID"].nunique())
     print(
-        "Missing reference predictions:",
-        submission["Predicted_Reference_Parameter"].isna().sum()
+        f"Submission rows: "
+        f"{len(submission)}"
     )
+
     print(
-        "Missing validity predictions:",
-        submission["Validity_Label"].isna().sum()
+        f"Unique Test IDs: "
+        f"{submission['Test_ID'].nunique()}"
+    )
+
+    print(
+        f"Missing reference predictions: "
+        f"{submission['Predicted_Reference_Parameter'].isna().sum()}"
+    )
+
+    print(
+        f"Missing validity predictions: "
+        f"{submission['Validity_Label'].isna().sum()}"
     )
 
     print("\nValidity counts:")
-    print(submission["Validity_Label"].value_counts())
+
+    print(
+        submission["Validity_Label"].value_counts()
+    )
 
     print("\nTop 3 IDs needing attention:")
+
     print(top_3)
 
     print("\nFiles created:")
-    print(submission_file)
-    print(summary_file)
 
-    print("\nFINAL PIPELINE COMPLETED SUCCESSFULLY!")
+    print(output_csv)
+    print(output_summary)
 
+    # --------------------------------------------------------
+    # Assertions
+    # --------------------------------------------------------
+
+    assert len(submission) == len(test)
+
+    assert (
+        submission["Test_ID"].nunique()
+        == len(test)
+    )
+
+    assert (
+        submission[
+            "Predicted_Reference_Parameter"
+        ].notna().all()
+    )
+
+    assert (
+        submission[
+            "Validity_Label"
+        ].notna().all()
+    )
+
+    assert set(
+        submission["Validity_Label"].unique()
+    ).issubset({
+        "Valid",
+        "Invalid"
+    })
+
+    print(
+        "\nFINAL PIPELINE COMPLETED SUCCESSFULLY!"
+    )
+
+
+# ============================================================
+# RUN
+# ============================================================
 
 if __name__ == "__main__":
     main()
