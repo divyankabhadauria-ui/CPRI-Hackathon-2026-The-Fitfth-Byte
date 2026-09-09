@@ -1,5 +1,5 @@
 """
-Produces exactly what the brief asks for:
+
   - Compares Logistic Regression, Random Forest, Extra Trees, Gradient Boosting
   - Evaluates each with Precision, Recall, F1-score, Confusion Matrix
   - Investigates WHY records are Invalid (not just "the model says so")
