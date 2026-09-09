@@ -14,4 +14,5 @@
     "regression_cv_mae": 0.8251987076927222,
     "classification_model": "Random Forest",
     "classification_cv_f1": 0.946589259796807
+    "methodology_explanation": "Missing sensor values were median-imputed using training data and missingness indicators were retained. Engineering features including V×I and sensor-difference features were evaluated. Gradient Boosting was selected for Reference Parameter prediction using 5-fold cross-validation with MAE, while a class-balanced Random Forest was used for Valid/Invalid classification with stratified cross-validation and F1-score. Invalid probability, sensor inconsistency and missingness were combined to rank tests requiring attention. The final pipeline performs preprocessing, feature generation, model training, prediction and summary generation automatically."
 }
