@@ -1,7 +1,7 @@
 {
     "number_of_records": 350,
-    "number_valid": 312,
-    "number_invalid": 38,
+    "number_valid": 313,
+    "number_invalid": 37,
     "minimum_predicted_reference_parameter": 12.83295828772747,
     "maximum_predicted_reference_parameter": 60.97143692834163,
     "average_predicted_reference_parameter": 26.36223642528569,
@@ -11,5 +11,7 @@
         "TST-0178"
     ],
     "regression_model": "Gradient Boosting",
-    "classification_model": "Random Forest"
+    "regression_cv_mae": 0.8251987076927222,
+    "classification_model": "Random Forest",
+    "classification_cv_f1": 0.946589259796807
 }

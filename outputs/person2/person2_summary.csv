@@ -1,0 +1,2 @@
+task,training_records,test_records,target,best_model,cv_mae,cv_rmse,minimum_prediction,maximum_prediction,average_prediction
+Reference Parameter Prediction,1000,350,Reference_Parameter,Gradient Boosting,0.8500608474666255,2.208525690173085,12.61148370918098,61.132557930789865,26.346786907187635
