@@ -1,37 +1,30 @@
-"""
-
-  - Compares Logistic Regression, Random Forest, Extra Trees, Gradient Boosting
-  - Evaluates each with Precision, Recall, F1-score, Confusion Matrix
-  - Investigates WHY records are Invalid (not just "the model says so")
-  - Prints the final Output block: Best Model / F1 Score / Important Features /
-    Observed abnormal patterns
-"""
-
 import os
 import pandas as pd
+import numpy as np
 
 from sklearn.model_selection import train_test_split
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import (
     RandomForestClassifier,
     ExtraTreesClassifier,
     GradientBoostingClassifier
 )
+
 from sklearn.metrics import (
-    precision_score,
-    recall_score,
     f1_score,
-    confusion_matrix,
-    classification_report
+    classification_report,
+    confusion_matrix
 )
 
 
 # ============================================================
-# 1. SETTINGS
+# 1. FILE PATHS
 # ============================================================
 
 TRAIN_FILE = "data/training_data_for_person3_validity (1).csv"
-
 TEST_FILE = "data/CPRI_Hackathon_Screening_Dataset_PARTICIPANT.xlsx"
 
 OUTPUT_FOLDER = "outputs/person3"
@@ -40,29 +33,10 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
 # ============================================================
-# 2. LOAD TRAINING DATA
+# 2. FEATURES
 # ============================================================
 
-print("=" * 70)
-print("CPRI HACKATHON - PERSON 3")
-print("VALID / INVALID DETECTION")
-print("=" * 70)
-
-print("\nLoading Person 3 training data...")
-
-train = pd.read_csv(TRAIN_FILE)
-
-print("Training data shape:", train.shape)
-
-print("\nTraining columns:")
-print(train.columns.tolist())
-
-
-# ============================================================
-# 3. FEATURES
-# ============================================================
-
-feature_cols = [
+FEATURES = [
     "Applied_Voltage_kV",
     "Load_Current_A",
     "Ambient_Temperature_C",
@@ -70,12 +44,36 @@ feature_cols = [
     "Sensor_S1",
     "Sensor_S2",
     "Sensor_S3",
-    "Sensor_S4",
+    "Sensor_S4"
 ]
 
 TARGET = "Validity_Label"
 
-X = train[feature_cols].copy()
+
+# ============================================================
+# 3. LOAD TRAINING DATA
+# ============================================================
+
+print("\nLoading Person 3 training data...")
+
+train = pd.read_csv(TRAIN_FILE)
+
+print("Training shape:", train.shape)
+
+
+# Check required columns
+missing_columns = [
+    col for col in FEATURES + [TARGET]
+    if col not in train.columns
+]
+
+if missing_columns:
+    raise ValueError(
+        f"Missing required columns: {missing_columns}"
+    )
+
+
+X = train[FEATURES].copy()
 y = train[TARGET].copy()
 
 
@@ -83,15 +81,14 @@ y = train[TARGET].copy()
 # 4. HANDLE MISSING VALUES
 # ============================================================
 
-print("\nMissing values before imputation:")
-print(X.isnull().sum())
+print("\nHandling missing values...")
 
-medians = X.median(numeric_only=True)
+imputer = SimpleImputer(strategy="median")
 
-X = X.fillna(medians)
-
-print("\nMissing values after imputation:")
-print(X.isnull().sum())
+X_imputed = pd.DataFrame(
+    imputer.fit_transform(X),
+    columns=FEATURES
+)
 
 
 # ============================================================
@@ -99,19 +96,19 @@ print(X.isnull().sum())
 # ============================================================
 
 X_train, X_val, y_train, y_val = train_test_split(
-    X,
+    X_imputed,
     y,
-    test_size=0.2,
+    test_size=0.20,
     random_state=42,
     stratify=y
 )
 
 
 # ============================================================
-# 6. DEFINE MODELS
+# 6. MODELS
 # ============================================================
 
-candidates = {
+models = {
 
     "Logistic Regression": LogisticRegression(
         max_iter=2000,
@@ -142,88 +139,84 @@ candidates = {
 # 7. MODEL COMPARISON
 # ============================================================
 
-print("\n" + "=" * 70)
+print("\n" + "=" * 60)
 print("MODEL COMPARISON")
-print("=" * 70)
+print("=" * 60)
 
-scores = {}
-fitted_models = {}
-comparison_results = []
+results = []
 
+best_model_name = None
+best_f1 = -1
+best_model = None
 
-for name, model in candidates.items():
-
-    print(f"\nEvaluating {name}...")
+for name, model in models.items():
 
     model.fit(X_train, y_train)
 
-    preds = model.predict(X_val)
+    predictions = model.predict(X_val)
 
     f1 = f1_score(
         y_val,
-        preds,
+        predictions,
         pos_label="Invalid"
     )
 
-    precision = precision_score(
-        y_val,
-        preds,
-        pos_label="Invalid"
-    )
-
-    recall = recall_score(
-        y_val,
-        preds,
-        pos_label="Invalid"
-    )
-
-    scores[name] = f1
-    fitted_models[name] = model
-
-    comparison_results.append({
+    results.append({
         "Model": name,
-        "Precision_Invalid": precision,
-        "Recall_Invalid": recall,
         "F1_Invalid": f1
     })
 
-    print(f"\n--- {name} ---")
+    print(f"{name}: F1 = {f1:.4f}")
 
-    print(classification_report(y_val, preds))
+    if f1 > best_f1:
+        best_f1 = f1
+        best_model_name = name
+        best_model = model
 
-    print(
-        "Confusion matrix "
-        "[rows=actual, cols=predicted], "
-        "order=[Valid, Invalid]:"
-    )
 
-    print(
-        confusion_matrix(
-            y_val,
-            preds,
-            labels=["Valid", "Invalid"]
-        )
-    )
+print("\nBest Model:", best_model_name)
+print("Best F1 Score:", round(best_f1, 4))
 
 
 # ============================================================
-# 8. SAVE MODEL COMPARISON
+# 8. CLASSIFICATION REPORT
 # ============================================================
 
-comparison_df = pd.DataFrame(comparison_results)
+validation_predictions = best_model.predict(X_val)
 
-comparison_df = comparison_df.sort_values(
-    "F1_Invalid",
-    ascending=False
-).reset_index(drop=True)
+print("\n" + "=" * 60)
+print("CLASSIFICATION REPORT")
+print("=" * 60)
 
-print("\n" + "=" * 70)
-print("MODEL SUMMARY")
-print("=" * 70)
+print(
+    classification_report(
+        y_val,
+        validation_predictions
+    )
+)
 
-print(comparison_df.to_string(index=False))
 
-comparison_df.to_csv(
+# ============================================================
+# 9. CONFUSION MATRIX
+# ============================================================
+
+print("\nConfusion Matrix:")
+
+print(
+    confusion_matrix(
+        y_val,
+        validation_predictions
+    )
+)
+
+
+# ============================================================
+# 10. SAVE MODEL COMPARISON
+# ============================================================
+
+results_df = pd.DataFrame(results)
+
+results_df.to_csv(
     os.path.join(
         OUTPUT_FOLDER,
         "model_comparison.csv"
@@ -233,75 +226,26 @@ comparison_df.to_csv(
 
 
 # ============================================================
-# 9. SELECT BEST MODEL
+# 11. FEATURE IMPORTANCE
 # ============================================================
 
-best_name = max(
-    scores,
-    key=scores.get
-)
-
-best_model = fitted_models[best_name]
-
-best_f1 = scores[best_name]
-
-print("\n" + "=" * 70)
-print("BEST MODEL")
-print("=" * 70)
-
-print(f"\nBest Model: {best_name}")
-print(f"Invalid F1 Score: {best_f1:.4f}")
-
-
-# ============================================================
-# 10. FEATURE IMPORTANCE
-# ============================================================
-
-print("\n" + "=" * 70)
-print("IMPORTANT FEATURES")
-print("=" * 70)
+print("\n" + "=" * 60)
+print("FEATURE IMPORTANCE")
+print("=" * 60)
 
 if hasattr(best_model, "feature_importances_"):
 
-    importance = pd.Series(
-        best_model.feature_importances_,
-        index=feature_cols
+    importance_df = pd.DataFrame({
+        "Feature": FEATURES,
+        "Importance": best_model.feature_importances_
+    })
+
+    importance_df = importance_df.sort_values(
+        "Importance",
+        ascending=False
     )
 
-    important_features = (
-        importance
-        .sort_values(ascending=False)
-    )
-
-elif hasattr(best_model, "coef_"):
-
-    importance = pd.Series(
-        best_model.coef_[0],
-        index=feature_cols
-    ).abs()
-
-    important_features = (
-        importance
-        .sort_values(ascending=False)
-    )
-
-else:
-
-    important_features = None
-
-
-if important_features is not None:
-
-    print(
-        important_features.to_string()
-    )
-
-    importance_df = important_features.reset_index()
-
-    importance_df.columns = [
-        "Feature",
-        "Importance"
-    ]
+    print(importance_df.to_string(index=False))
 
     importance_df.to_csv(
         os.path.join(
@@ -311,213 +255,89 @@ if important_features is not None:
         index=False
     )
 
-else:
-
-    print("Feature importance not available.")
-
 
 # ============================================================
-# 11. OBSERVED ABNORMAL PATTERNS
+# 12. TRAIN BEST MODEL ON ALL TRAINING DATA
 # ============================================================
 
-print("\n" + "=" * 70)
-print("OBSERVED ABNORMAL PATTERNS")
-print("=" * 70)
+print("\nTraining best model on complete training data...")
 
-comparison = (
-    train.groupby(TARGET)[feature_cols]
-    .mean()
-    .T
-)
-
-comparison["difference"] = (
-    comparison["Invalid"]
-    - comparison["Valid"]
-)
-
-comparison["pct_difference"] = (
-    comparison["difference"]
-    / comparison["Valid"]
-    * 100
-).round(1)
-
-comparison = comparison.sort_values(
-    "pct_difference",
-    key=abs,
-    ascending=False
-)
-
-print(comparison.to_string())
-
-comparison.to_csv(
-    os.path.join(
-        OUTPUT_FOLDER,
-        "abnormal_patterns.csv"
-    )
+best_model.fit(
+    X_imputed,
+    y
 )
 
 
 # ============================================================
-# 12. LOAD REAL TEST DATA
+# 13. LOAD TEST DATA
 # ============================================================
 
-print("\n" + "=" * 70)
-print("PREDICTING REAL TEST DATA")
-print("=" * 70)
-
-raw_train = pd.read_excel(
-    TEST_FILE,
-    sheet_name="Training_Data"
-)
+print("\nLoading test data...")
 
 test = pd.read_excel(
     TEST_FILE,
     sheet_name="Test_Data"
 )
 
+print("Test shape:", test.shape)
+
 
 # ============================================================
-# 13. IMPUTE TEST DATA
+# 14. PREPARE TEST DATA
 # ============================================================
 
-sensor_cols = [
-    "Sensor_S1",
-    "Sensor_S2",
-    "Sensor_S3",
-    "Sensor_S4"
-]
+X_test = test[FEATURES].copy()
 
-test[sensor_cols] = test[sensor_cols].fillna(
-    raw_train[sensor_cols].median()
+X_test_imputed = pd.DataFrame(
+    imputer.transform(X_test),
+    columns=FEATURES
 )
 
 
 # ============================================================
-# 14. TRAIN BEST MODEL ON ALL TRAINING DATA
+# 15. PREDICT VALID / INVALID
 # ============================================================
 
-print("\nTraining best model on all training data...")
-
-final_model = type(best_model)(
-    **best_model.get_params()
-)
-
-final_model.fit(X, y)
-
-print("Training complete.")
-
-
-# ============================================================
-# 15. PREDICT TEST DATA
-# ============================================================
-
-test_predictions = final_model.predict(
-    test[feature_cols]
+test_predictions = best_model.predict(
+    X_test_imputed
 )
 
 
 # ============================================================
-# 16. CREATE RESULTS
+# 16. SAVE PREDICTIONS
 # ============================================================
 
-results = pd.DataFrame({
+prediction_output = pd.DataFrame({
     "Test_ID": test["Test_ID"],
     "Predicted_Validity_Label": test_predictions
 })
 
-
-print("\nPredicted counts on test set:")
-
-print(
-    results["Predicted_Validity_Label"].value_counts()
-)
-
-invalid_percentage = (
-    results["Predicted_Validity_Label"]
-    .eq("Invalid")
-    .mean()
-    * 100
-)
-
-print(
-    f"\n% Invalid: {invalid_percentage:.2f}%"
-)
-
-
-# ============================================================
-# 17. DISPLAY FIRST 15
-# ============================================================
-
-print("\nFirst 15 predictions:")
-
-print(
-    results
-    .head(15)
-    .to_string(index=False)
-)
-
-
-# ============================================================
-# 18. SAVE PREDICTIONS
-# ============================================================
 
 prediction_file = os.path.join(
     OUTPUT_FOLDER,
     "validity_predictions_final.csv"
 )
 
-results.to_csv(
+prediction_output.to_csv(
     prediction_file,
     index=False
 )
 
+
+# ============================================================
+# 17. PRINT FINAL COUNTS
+# ============================================================
+
+print("\n" + "=" * 60)
+print("FINAL TEST PREDICTIONS")
+print("=" * 60)
+
 print(
-    f"\nSaved predictions -> {prediction_file}"
+    prediction_output[
+        "Predicted_Validity_Label"
+    ].value_counts()
 )
 
+print("\nSaved:", prediction_file)
 
-# ============================================================
-# 19. SAVE SUMMARY
-# ============================================================
-
-summary = {
-    "task": "Validity Detection",
-    "training_records": int(len(train)),
-    "test_records": int(len(test)),
-    "best_model": best_name,
-    "invalid_f1": float(best_f1),
-    "test_valid": int(
-        (
-            results["Predicted_Validity_Label"]
-            == "Valid"
-        ).sum()
-    ),
-    "test_invalid": int(
-        (
-            results["Predicted_Validity_Label"]
-            == "Invalid"
-        ).sum()
-    ),
-    "test_invalid_percentage": float(
-        invalid_percentage
-    )
-}
-
-summary_df = pd.DataFrame([summary])
-
-summary_df.to_csv(
-    os.path.join(
-        OUTPUT_FOLDER,
-        "person3_summary.csv"
-    ),
-    index=False
-)
-
-
-# ============================================================
-# 20. FINAL MESSAGE
-# ============================================================
-
-print("\n" + "=" * 70)
-print("PERSON 3 PIPELINE COMPLETED SUCCESSFULLY")
-print("=" * 70)
+print("\nPerson 3 validity detection completed successfully! ✅")
