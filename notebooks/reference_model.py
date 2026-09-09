@@ -12,11 +12,9 @@ from sklearn.ensemble import (
 from sklearn.linear_model import LinearRegression
 
 
-
 # 1. SETTINGS
-INPUT_FILE = "CPRI_Hackathon_Screening_Dataset_PARTICIPANT.xlsx"
-
-OUTPUT_FOLDER = "output"
+INPUT_FILE = "data/CPRI_Hackathon_Screening_Dataset_PARTICIPANT.xlsx"
+OUTPUT_FOLDER = "outputs/person2"
 
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
@@ -35,13 +33,11 @@ print("\nAvailable sheets:")
 print(excel_file.sheet_names)
 
 
-# Training data
 train = pd.read_excel(
     INPUT_FILE,
     sheet_name="Training_Data"
 )
 
-# Test data
 test = pd.read_excel(
     INPUT_FILE,
     sheet_name="Test_Data"
@@ -68,19 +64,15 @@ DROP_COLUMNS = [
     "Reference_Parameter"
 ]
 
-
 if TARGET not in train.columns:
     raise ValueError(
         "Reference_Parameter column was not found in Training_Data."
     )
 
 
-# Select features
 X = train.drop(columns=DROP_COLUMNS)
-
 y = train[TARGET]
 
-# Test features have the same columns
 X_test = test[X.columns]
 
 
@@ -92,26 +84,23 @@ for feature in X.columns:
     print(" -", feature)
 
 
-# 5. CHECK DATA
+# 5. HANDLE MISSING VALUES
 print("\nMissing values in training features:")
 
 missing_values = X.isnull().sum()
-
 print(missing_values)
 
 if missing_values.sum() > 0:
 
-    print("\nMissing values detected.")
+    print("\nMissing values detected. Applying median imputation.")
 
-    # Median imputation for safety
-    X = X.fillna(X.median(numeric_only=True))
+    medians = X.median(numeric_only=True)
 
-    X_test = X_test.fillna(X.median(numeric_only=True))
+    X = X.fillna(medians)
+    X_test = X_test.fillna(medians)
 
 else:
-
     print("No missing feature values detected.")
-
 
 
 # 6. DEFINE MODELS
@@ -192,7 +181,6 @@ for name, model in models.items():
 
 results_df = pd.DataFrame(results)
 
-# Best model = lowest MAE
 results_df = results_df.sort_values(
     "CV_MAE"
 ).reset_index(drop=True)
@@ -202,7 +190,7 @@ print("\n")
 print(results_df.to_string(index=False))
 
 
-# Save model comparison
+# Save comparison
 results_df.to_csv(
     os.path.join(
         OUTPUT_FOLDER,
@@ -223,13 +211,13 @@ print("\nBest model:", BEST_MODEL_NAME)
 
 best_model = models[BEST_MODEL_NAME]
 
-# 9. TRAIN BEST MODEL ON ALL TRAINING DATA
+
+# 9. TRAIN BEST MODEL
 print("\nTraining best model on all training data...")
 
 best_model.fit(X, y)
 
 print("Training complete.")
-
 
 
 # 10. FEATURE IMPORTANCE
@@ -253,9 +241,7 @@ if hasattr(best_model, "feature_importances_"):
         importance_df["Importance"] * 100
     )
 
-    print(
-        importance_df.to_string(index=False)
-    )
+    print(importance_df.to_string(index=False))
 
     importance_df.to_csv(
         os.path.join(
@@ -271,9 +257,6 @@ else:
         "Feature importance is not directly available "
         "for this model."
     )
-
-    importance_df = None
-
 
 
 # 11. PREDICT TEST DATA
@@ -301,7 +284,6 @@ prediction_df.to_csv(
     index=False
 )
 
-
 print("\nPrediction file created:")
 print(prediction_file)
 
@@ -316,9 +298,7 @@ print("\n" + "=" * 70)
 print("PREDICTION STATISTICS")
 print("=" * 70)
 
-print(
-    f"\nNumber of test records: {len(test_predictions)}"
-)
+print(f"\nNumber of test records: {len(test_predictions)}")
 
 print(
     f"Minimum predicted Reference Parameter: "
@@ -335,7 +315,8 @@ print(
     f"{average_prediction:.4f}"
 )
 
-# 14. DISPLAY FIRST 20 PREDICTIONS
+
+# 14. FIRST 20 PREDICTIONS
 print("\n" + "=" * 70)
 print("FIRST 20 TEST PREDICTIONS")
 print("=" * 70)
@@ -369,4 +350,6 @@ summary_df.to_csv(
     index=False
 )
 
-
+print("\n" + "=" * 70)
+print("PERSON 2 PIPELINE COMPLETED SUCCESSFULLY")
+print("=" * 70)
